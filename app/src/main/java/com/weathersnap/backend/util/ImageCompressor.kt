@@ -41,7 +41,7 @@ class ImageCompressor @Inject constructor(
 
         // Create the compressed output file in app's internal storage
         val compressedFile = File(
-            context.filesDir,
+            context.cacheDir,
             "compressed_${System.currentTimeMillis()}.jpg"
         )
 

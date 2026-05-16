@@ -11,6 +11,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import android.content.Context
+import androidx.lifecycle.SavedStateHandle
+import dagger.hilt.android.qualifiers.ApplicationContext
+import java.io.File
 import javax.inject.Inject
 
 /**
@@ -19,22 +23,18 @@ import javax.inject.Inject
  */
 @HiltViewModel
 class ReportViewModel @Inject constructor(
-    private val reportRepository: ReportRepository
+    private val reportRepository: ReportRepository,
+    private val savedStateHandle: SavedStateHandle,
+    @ApplicationContext private val context: Context
 ) : ViewModel() {
 
-    // ── Image State ──
-    private val _imagePath = MutableStateFlow<String?>(null)
-    val imagePath: StateFlow<String?> = _imagePath.asStateFlow()
+    // ── Image State (Survives Process Death) ──
+    val imagePath: StateFlow<String?> = savedStateHandle.getStateFlow("imagePath", null)
+    val originalImageSize: StateFlow<Long> = savedStateHandle.getStateFlow("originalImageSize", 0L)
+    val compressedImageSize: StateFlow<Long> = savedStateHandle.getStateFlow("compressedImageSize", 0L)
 
-    private val _originalImageSize = MutableStateFlow(0L)
-    val originalImageSize: StateFlow<Long> = _originalImageSize.asStateFlow()
-
-    private val _compressedImageSize = MutableStateFlow(0L)
-    val compressedImageSize: StateFlow<Long> = _compressedImageSize.asStateFlow()
-
-    // ── Notes ──
-    private val _notes = MutableStateFlow("")
-    val notes: StateFlow<String> = _notes.asStateFlow()
+    // ── Notes (Survives Process Death) ──
+    val notes: StateFlow<String> = savedStateHandle.getStateFlow("notes", "")
 
     // ── Save State ──
     private val _isSaving = MutableStateFlow(false)
@@ -48,19 +48,19 @@ class ReportViewModel @Inject constructor(
 
     /** Updates the notes text. */
     fun onNotesChanged(text: String) {
-        _notes.value = text
+        savedStateHandle["notes"] = text
     }
 
     /** Sets the captured and compressed image data. */
     fun setImageData(path: String, originalSize: Long, compressedSize: Long) {
-        _imagePath.value = path
-        _originalImageSize.value = originalSize
-        _compressedImageSize.value = compressedSize
+        savedStateHandle["imagePath"] = path
+        savedStateHandle["originalImageSize"] = originalSize
+        savedStateHandle["compressedImageSize"] = compressedSize
     }
 
     /** Saves the report to Room DB on the IO dispatcher. */
     fun saveReport(weather: Weather) {
-        val currentImagePath = _imagePath.value
+        val currentImagePath = imagePath.value
         if (currentImagePath == null) {
             _saveError.value = "Please capture a photo first"
             return
@@ -69,6 +69,14 @@ class ReportViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             _isSaving.value = true
             try {
+                // Move file from cache to persistent files dir
+                val tempFile = File(currentImagePath)
+                val persistentFile = File(context.filesDir, tempFile.name)
+                if (tempFile.exists()) {
+                    tempFile.copyTo(persistentFile, overwrite = true)
+                    tempFile.delete()
+                }
+
                 val report = Report(
                     cityName = weather.cityName,
                     country = weather.country,
@@ -77,10 +85,10 @@ class ReportViewModel @Inject constructor(
                     humidity = weather.humidity,
                     windSpeed = weather.windSpeed,
                     pressure = weather.pressure,
-                    imagePath = currentImagePath,
-                    originalImageSize = _originalImageSize.value,
-                    compressedImageSize = _compressedImageSize.value,
-                    notes = _notes.value,
+                    imagePath = persistentFile.absolutePath,
+                    originalImageSize = originalImageSize.value,
+                    compressedImageSize = compressedImageSize.value,
+                    notes = notes.value,
                     timestamp = System.currentTimeMillis()
                 )
                 reportRepository.saveReport(report)
@@ -95,10 +103,10 @@ class ReportViewModel @Inject constructor(
 
     /** Resets the ViewModel state for a new report. */
     fun resetState() {
-        _imagePath.value = null
-        _originalImageSize.value = 0L
-        _compressedImageSize.value = 0L
-        _notes.value = ""
+        savedStateHandle["imagePath"] = null
+        savedStateHandle["originalImageSize"] = 0L
+        savedStateHandle["compressedImageSize"] = 0L
+        savedStateHandle["notes"] = ""
         _saveSuccess.value = false
         _saveError.value = null
     }

@@ -83,3 +83,12 @@ gradle wrapper --gradle-version 8.4
 - ✅ Animated UI states (loading, success, error, suggestions)
 - ✅ **Debug-only** OkHttp logging interceptor
 - ✅ Material 3 dark theme
+
+## Developer Judgment Challenge Implementation
+
+**Requirement:** Ensure in-progress reports survive process death and prevent temporary image leaks.
+
+**Approach & Tradeoffs:**
+1. **Process Death Recovery:** The `ReportViewModel` has been updated to use `SavedStateHandle` instead of standard `MutableStateFlow` for holding the in-progress `notes`, `imagePath`, and image sizes. If the user backgrounds the app and Android kills the process to free memory, the state is preserved and restored perfectly when the app is reopened.
+2. **Preventing Indefinite Leaks:** `ImageCompressor` originally saved compressed images directly to `context.filesDir`. This meant if a user cancelled the report, the image would be orphaned and leak storage indefinitely. To fix this, I changed the compression output directory to `context.cacheDir`. The Android OS automatically cleans `cacheDir` when space is needed. 
+3. **Persisting Saved Images:** When the user explicitly clicks "Save Report", the `ReportViewModel` copies the temporary image from `cacheDir` to `filesDir` (which is persistent) and saves the report with the new permanent path. This perfectly balances safe persistence for saved reports and automatic cleanup for abandoned ones.
